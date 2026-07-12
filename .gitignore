@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+*.o
+*.out
+*.a
+
+
+# macOS metadata
+.DS_Store
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / IDE directories
+.vscode/
+.idea/
+*.swp
