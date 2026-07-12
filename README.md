@@ -1,6 +1,31 @@
 # Optimal Caching Analysis: LRU vs Belady vs FIFO vs SLRU
 
-A comparative performance analysis of cache replacement algorithms implemented in C++, with Python-based visualization tooling. Built for an Advanced Algorithms university assignment.
+A comparative performance analysis of cache replacement algorithms implemented in C++, with Python-based visualization. Built for an Advanced Algorithms university assignment.
+
+---
+
+## TL;DR — Who Actually Wins and Why
+
+> **Belady's algorithm has the best hit rate on every graph. This is expected and intentional — it is a theoretical benchmark, not a real competitor.**
+
+Belady's is an **offline** algorithm. It requires the complete future request sequence before processing a single step. In any real system — a web browser, database, or OS — the future is unknown. Belady's wins by cheating with a crystal ball.
+
+The actual competition is between the **online** algorithms: LRU, SLRU, and FIFO.
+
+| Comparison | Winner | Reason |
+|---|---|---|
+| LRU vs Belady (hit rate) | Belady | Belady cheats — it sees the future |
+| LRU vs Belady (speed) | **LRU** | O(1) vs O(n·k); Belady is ~65% slower at 1M requests |
+| LRU vs FIFO (hit rate) | **LRU** | LRU tracks recency; FIFO evicts blindly |
+| LRU vs FIFO (anomaly) | **LRU** | LRU is immune to Belady's Anomaly; FIFO is not |
+| LRU vs SLRU (pollution) | **SLRU** | SLRU's Protected zone survives scan floods |
+| NaiveLRU vs OptimizedLRU | **Optimized** | Same hit rate, O(1) vs O(k) speed |
+
+**How to read the graphs:**
+- Belady's curve = the hard theoretical ceiling no algorithm can exceed
+- LRU and SLRU = the practical winners for real-world deployment
+- FIFO = the cautionary example (anomaly-prone, locality-blind)
+- NaiveLRU = proof that data structure choice determines real-world performance
 
 ---
 
@@ -8,21 +33,37 @@ A comparative performance analysis of cache replacement algorithms implemented i
 
 | Algorithm | Type | Time Complexity | Data Structure |
 |---|---|---|---|
-| **Optimized LRU** | Online | O(1) get & put | Doubly Linked List + Hash Map |
-| **Segmented LRU (SLRU)** | Online | O(1) get & put | Two-zone DLL + Hash Map |
-| **Naive LRU** | Online | O(k) get & put | `std::vector` |
-| **FIFO** | Online | O(1) get & put | `std::queue` + Hash Map |
-| **Belady's Optimal** | Offline | O(n) pre-process, O(k) evict | Future-access Queue + Hash Map |
+| **Optimized LRU** | Online | O(1) | DLL + HashMap |
+| **Segmented LRU (SLRU)** | Online | O(1) | Two-zone DLL + HashMap |
+| **Naive LRU** | Online | O(k) | `std::vector` |
+| **FIFO** | Online | O(1) | `std::queue` + HashMap |
+| **Belady's Optimal** | **Offline (theoretical only)** | O(n) pre-process | Future-access Queue |
 
 ---
 
 ## Why LRU Wins
 
-**Against Belady's:** Belady's algorithm is clairvoyant — it requires the full future request sequence ahead of time. In any real system (OS page tables, web caches, databases), the future is unknown. While Belady's achieves a lower miss rate theoretically, the scalability benchmark shows its execution time grows ~65% faster than LRU at 1M requests. LRU gives you O(1) performance on unknown workloads — Belady's gives you O(n·k) overhead on a sequence you already have to store completely.
+### Against Belady's: Speed is the argument
 
-**Against FIFO:** FIFO suffers from **Belady's Anomaly** — giving it more memory can *increase* cache misses. This is formally proved in the test suite. LRU is a **stack algorithm** and is mathematically immune to this anomaly.
+Belady's Farthest-in-Future requires seeing the entire future request sequence before running. This makes it impossible to deploy in any real system. While it achieves the minimum possible misses, the scalability benchmark (`results/scalability.csv`) shows its execution time grows ~65% faster than Optimized LRU at 1M requests. LRU's O(1) architecture processes each request instantly regardless of sequence length.
 
-**LRU's weakness acknowledged:** Standard LRU is vulnerable to **cache pollution** from sequential scans. SLRU fixes this by splitting the cache into a Probation zone (new/unproven items) and a Protected zone (frequently accessed items). Scan items never escape Probation.
+### Against FIFO: Belady's Anomaly
+
+FIFO evicts the oldest item regardless of access frequency. Worse, it suffers from **Belady's Anomaly** — giving it more memory can *increase* cache misses. Using the reference sequence `[3,2,1,0,3,2,4,3,2,1,0,4]`:
+- FIFO k=3 → 9 misses
+- FIFO k=4 → **10 misses** (more memory = more misses — the anomaly)
+- LRU k=3 → 10 misses
+- LRU k=4 → **8 misses** (monotonically improves — mathematically guaranteed)
+
+LRU is a **stack algorithm** and is formally proven immune to Belady's Anomaly.
+
+### LRU's Weakness Acknowledged: Cache Pollution
+
+Standard LRU fails during sequential scans. A background process reading 1000 unique files once evicts the entire hot working set. The fix is **SLRU**: 20% Probation zone + 80% Protected zone. New items enter Probation. Only after a second access are they promoted to Protected. Scan items (accessed once) never escape Probation.
+
+Proof (`test_cache_pollution.cpp`):
+- Standard LRU after scan: **0% hit rate** (hot set wiped — assert passes)
+- SLRU after same scan: **100% hit rate** (hot set intact — assert passes)
 
 ---
 
@@ -30,213 +71,116 @@ A comparative performance analysis of cache replacement algorithms implemented i
 
 ```
 LRU_Cache/
-├── CMakeLists.txt              # Primary build configuration
-├── Makefile                    # Convenience wrapper (delegates to cmake)
+├── CMakeLists.txt
+├── Makefile
 ├── README.md
-│
-├── include/                    # C++ headers (interfaces)
-│   ├── LRUCache.h              # Optimized O(1) LRU
-│   ├── NaiveLRU.h              # Deliberate O(k) LRU for comparison
-│   ├── FIFOCache.h             # FIFO — demonstrates Belady's Anomaly
-│   ├── BeladyCache.h           # Offline optimal (farthest-in-future)
-│   └── SLRU.h                  # Segmented LRU — immune to cache pollution
-│
-├── src/                        # C++ source implementations
+├── include/
+│   ├── LRUCache.h          # O(1) LRU — DLL + HashMap
+│   ├── NaiveLRU.h          # O(k) LRU — vector baseline
+│   ├── FIFOCache.h         # FIFO — anomaly demonstration
+│   ├── BeladyCache.h       # Offline optimal — theoretical ceiling
+│   └── SLRU.h              # Segmented LRU — pollution-resistant
+├── src/
 │   ├── LRUCache.cpp
 │   ├── NaiveLRU.cpp
 │   ├── FIFOCache.cpp
 │   ├── BeladyCache.cpp
 │   ├── SLRU.cpp
-│   └── main.cpp                # Simulation driver + scalability benchmark
-│
+│   └── main.cpp            # Simulation driver + scalability benchmark
 ├── tests/
-│   ├── test_beladys_anomaly.cpp  # Proves FIFO anomaly & LRU immunity
-│   └── test_cache_pollution.cpp  # Proves SLRU resists scan pollution
-│
+│   ├── test_beladys_anomaly.cpp   # Proves FIFO anomaly & LRU immunity
+│   └── test_cache_pollution.cpp   # Proves SLRU resists scan pollution
 ├── scripts/
-│   ├── generate_testcases.py     # Generates data/ input files
-│   ├── generate_plots.py         # Individual PNG plots from results/
-│   └── generate_combined_plot.py # 2×2 dashboard + scalability graph
-│
-├── data/                         # Generated by generate_testcases.py
-│   ├── uniform_random_seq.txt    # 10,000 uniformly random requests
-│   └── high_locality_seq.txt     # 10,000 requests with 80% hot-set hits
-│
-├── results/                      # Generated by cache_sim
+│   ├── generate_testcases.py
+│   ├── generate_plots.py
+│   └── generate_combined_plot.py
+├── data/
+│   ├── uniform_random_seq.txt
+│   └── high_locality_seq.txt
+├── results/
 │   ├── hit_miss_ratios.csv
 │   ├── execution_times.csv
-│   ├── scalability.csv           # Time vs. request count benchmark
-│   └── plots/                    # PNG graphs (generated by Python scripts)
-│
+│   ├── scalability.csv
+│   └── plots/
 └── docs/
-    └── report.pdf
+    └── implementation_analysis.txt
 ```
 
 ---
 
 ## Requirements
 
-**C++ build:**
-- CMake ≥ 3.16
-- GCC / Clang with C++17 support
-
-**Python visualization:**
-- Python 3.9+
-- `matplotlib` → `pip install matplotlib`
+- CMake ≥ 3.16, GCC/Clang with C++17
+- Python 3.9+, `matplotlib` (`pip install matplotlib`)
 
 ---
 
 ## How to Build and Run
 
-### Step 1 — Build everything
-
-```bash
-make
-```
-
-This runs CMake and compiles three binaries into `build/bin/`:
-- `cache_sim` — main simulation driver
-- `test_anomaly` — Belady's Anomaly proof test
-- `test_pollution` — Cache pollution proof test
-
-To clean and rebuild from scratch:
-
-```bash
-make clean && make
-```
-
----
-
-### Step 2 — Generate test data
-
-```bash
-python3 scripts/generate_testcases.py
-```
-
-Creates two files in `data/`:
-- `uniform_random_seq.txt` — 10,000 requests drawn uniformly from key range [0, 100). Models a no-locality worst case.
-- `high_locality_seq.txt` — 10,000 requests where 80% of accesses hit a small hot set of 10 keys. Models real-world workloads.
-
-Optional flags:
-```bash
-python3 scripts/generate_testcases.py --n 50000 --key-range 200 --seed 7
-```
-
----
-
-### Step 3 — Run the simulation
-
-```bash
-make run
-# or directly:
-./build/bin/cache_sim
-```
-
-This does two things:
-
-1. **Hit/Miss Simulation** — sweeps cache sizes `k = 2, 4, 8, 12, 16, 24, 32, 48, 64` for all five algorithms on both datasets. Outputs:
-   - `results/hit_miss_ratios.csv`
-   - `results/execution_times.csv`
-
-2. **Scalability Benchmark** — generates sequences of 10K to 1M requests in-memory and times each algorithm at `k=16`. Outputs:
-   - `results/scalability.csv`
-
----
-
-### Step 4 — Generate plots
-
-```bash
-python3 scripts/generate_plots.py
-```
-
-Outputs 5 PNGs to `results/plots/`:
-- `hit_rate_uniform_random.png`
-- `hit_rate_high_locality.png`
-- `exec_time_uniform_random.png`
-- `exec_time_high_locality.png`
-- `scalability.png` ← the key graph that proves O(1) LRU vs. Belady's growth
-
-For a single combined dashboard:
-```bash
-python3 scripts/generate_combined_plot.py
-```
-Outputs `results/plots/combined_dashboard.png` — a 2×2 grid of all algorithms + a scalability subplot.
-
----
-
-### One-liner (full pipeline)
+### Full pipeline (one command)
 
 ```bash
 make clean && make && python3 scripts/generate_testcases.py && make run && python3 scripts/generate_plots.py && python3 scripts/generate_combined_plot.py
+```
+
+### Step by step
+
+```bash
+# 1. Build all binaries
+make
+
+# 2. Generate input sequences
+python3 scripts/generate_testcases.py
+
+# 3. Run the simulation (hit/miss sweep + scalability benchmark)
+make run
+
+# 4. Generate all plots
+python3 scripts/generate_plots.py
+python3 scripts/generate_combined_plot.py
 ```
 
 ---
 
 ## Running the Tests
 
-### Test 1 — Belady's Anomaly
-
 ```bash
+# Proves FIFO Belady's Anomaly and LRU immunity (hard asserts)
 ./build/bin/test_anomaly
-# or:
-make test
-```
 
-**What it proves:**
-
-Using the reference sequence `[3, 2, 1, 0, 3, 2, 4, 3, 2, 1, 0, 4]`:
-- `FIFO k=3` → 9 misses
-- `FIFO k=4` → **10 misses** ← more cache = more misses (the anomaly)
-- `LRU k=3` → 10 misses
-- `LRU k=4` → 8 misses ← monotonically improves (immune)
-
-The test has hard `assert()` statements that fail if the counts are wrong.
-
-### Test 2 — Cache Pollution
-
-```bash
+# Proves LRU cache pollution and SLRU defence (hard asserts)
 ./build/bin/test_pollution
 ```
 
-**What it proves (3 sub-tests):**
-
-| Test | Setup | Result |
-|---|---|---|
-| 1. LRU Pollution | Warm 4 hot keys → scan 20 cold keys → re-access hot keys | **0% hit rate** — hot set wiped |
-| 2. SLRU Resistance | Same scan on SLRU (hot keys in Protected zone) | **100% hit rate** — hot set survives |
-| 3. Mixed Workload | Full sequence: LRU vs SLRU head-to-head | SLRU wins by ~4-5% |
+| Test | Expected Output |
+|---|---|
+| FIFO k=3 | 9 misses |
+| FIFO k=4 | 10 misses (anomaly confirmed) |
+| LRU k=4 | 8 misses (immunity confirmed) |
+| LRU after scan | 0% hit rate (pollution confirmed) |
+| SLRU after scan | 100% hit rate (defence confirmed) |
+| SLRU vs LRU mixed | SLRU wins by ~4-5% |
 
 ---
 
-## Understanding the Results
+## Understanding the Graphs
 
 ### Hit Rate vs. Cache Size
-- **Belady** is always the ceiling — no online algorithm can beat it.
-- **Optimized LRU** consistently outperforms FIFO on high-locality workloads.
-- **SLRU** outperforms LRU at small-to-medium cache sizes on locality workloads because the protected zone retains the hot working set more aggressively.
-- **Naive LRU** matches Optimized LRU in hit rate (same eviction policy) but is much slower in the execution time graph.
+Belady sits at the top as the unreachable ceiling. SLRU beats standard LRU at small-to-medium cache sizes on locality workloads. NaiveLRU and OptimizedLRU overlap exactly — the hit rate is identical because it is the same eviction policy.
 
-### Scalability
-The scalability graph (log-scale x-axis) is the key evidence:
-- LRU, SLRU, and FIFO scale linearly (O(1) per operation).
-- Belady's curve rises faster because it must pre-process and scan future indices.
-- Naive LRU has the steepest curve (O(k) per operation — each access is a linear scan).
+### Scalability Graph (the key graph for the LRU argument)
+The x-axis is on a log scale. LRU, SLRU, and FIFO stay relatively flat (O(1) per request). Belady's line rises more steeply because it must pre-process future indices. NaiveLRU rises fastest (O(k) linear scan per operation). This graph is the empirical proof that O(1) matters at scale.
 
 ---
 
 ## Algorithm Details
 
-### Optimized LRU
-Uses a **Doubly Linked List** with dummy sentinel head/tail nodes combined with a `std::unordered_map`. The MRU item is always at `head->next` and the LRU item is at `tail->prev`. Every `get` or `put` is a constant number of pointer operations — strictly O(1).
+**Optimized LRU:** Doubly Linked List with dummy sentinel nodes + `unordered_map`. MRU at `head->next`, LRU at `tail->prev`. Constant-time pointer rewire on every operation.
 
-### Segmented LRU (SLRU)
-Splits total capacity into **20% Probation** and **80% Protected**. New items enter Probation. A second cache hit promotes an item to Protected. Items in Protected are safe from scan evictions — they can only be displaced by other Protected items. This fixes LRU's cache pollution vulnerability.
+**Segmented LRU:** 20% Probation + 80% Protected. Second hit promotes to Protected. Protected overflow demotes its LRU back to Probation. Scan items accessed once never escape Probation.
 
-### Naive LRU
-Uses a `std::vector<pair<int,int>>`. Every `get` and `put` requires a linear scan (O(k)), and every promotion requires an O(k) erase + insert. Included to prove why the Hash Map + DLL design is necessary at scale.
+**Naive LRU:** `vector<pair<int,int>>` with linear scan. O(k) time. Identical hit rate to OptimizedLRU — exists only to show why HashMap+DLL is necessary.
 
-### Belady's Optimal
-Pre-processes the full request sequence in O(n) to build a future-access queue per key. At eviction time, it scans all cached keys and evicts the one whose next access is furthest away (or never). Provably optimal but requires the complete future sequence — not usable in practice.
+**Belady's Optimal (offline, theoretical):** Pre-processes the full sequence to build per-key future-access queues. At eviction, picks the key whose next access is farthest away. Provably optimal but strictly requires full future knowledge.
 
-### FIFO
-Uses a `std::queue` for insertion order and a `std::unordered_map` for O(1) lookup. On eviction, it removes the item that has been in the cache the longest, regardless of how recently it was accessed. Subject to Belady's Anomaly.
+**FIFO:** `queue` for insertion order + `unordered_map` for lookup. Evicts the oldest item regardless of recency. Susceptible to Belady's Anomaly.
