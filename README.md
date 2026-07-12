@@ -176,7 +176,7 @@ Creates two files in `data/`:
 ```bash
 make run
 ```
-Sweeps cache sizes `k = 2, 4, 8, 12, 16, 24, 32, 48, 64` for all five algorithms, and runs a scalability benchmark from 10K to 1M requests. Writes results to `results/`.
+Sweeps cache sizes `k = 2, 4, 8, 12, 16, 24, 32, 48, 64` (for the 10K hit/miss simulation), and then runs a scalability benchmark from 10K to 1M requests at a fixed cache size of `k = 16`. Writes results to `results/`.
 
 ### Step 3 — Generate plots
 ```bash
@@ -216,12 +216,3 @@ Belady's sits at the top as the unreachable theoretical ceiling. SLRU is the top
 
 ### Scalability graph
 The x-axis is on a log scale from 10K to 1M requests, with cache size fixed at k=16. This graph is the empirical proof for LRU's O(1) advantage. LRU, SLRU, and FIFO rise nearly linearly. Belady's rises more steeply — it must pre-process the full sequence and scan all k cached keys per eviction. NaiveLRU rises steepest at large n because of its O(k) per-operation cost.
-
----
-
-## Documentation
-
-| File | Contents |
-|---|---|
-| `docs/algorithm_pseudocode.txt` | Standard academic pseudocode for all 5 algorithms with complexity annotations |
-| `docs/implementation_analysis.txt` | Step-by-step proof traces, design decisions, workload analysis, and real-world relevance |
